@@ -9,22 +9,127 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-## R Markdown
+# Introduction
 
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
 
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+# Objective
 
-```{r cars}
-summary(cars)
+The objective of the project is to use measurements from sensors worn on the bodies of six participants to classify the manner in which they perform a given exercise, a unilateral dumbbell biceps curl. The outcome is one of five possible classes:
+
+* Class A - performed the exercise to specification
+* Class B - throwing to the elbows to the front
+* Class C - lifting the dumbbell only half-way
+* Class D - lowering the dumbbell only half-way
+* Class E - throwing the hips to the front
+
+The model created will be used to classify 20 unseen cases.
+
+# Libraries
+Load the libraries that will be required for this project.
+```{r libraries, message=FALSE, warning=FALSE}
+library(caret)
+library(corrplot)
 ```
 
-## Including Plots
-
-You can also embed plots, for example:
-
-```{r pressure, echo=FALSE}
-plot(pressure)
+# Getting the Data
+The data for this project was downloaded and saved in the working directory on my local machine. It was then read into R using the "read.csv" command. The "na.strings" parameter was used to clean up any NAs, blanks or DIV/0 errors in the csv files. 
+```{r data}
+setwd("C:/Users/Padraig/R_stuff/Practical Machine Learning")
+pmlTrain <- read.csv("pml-training.csv", na.strings=c("NA", "#DIV/0!", " "))
+pmlTest <- read.csv("pml-testing.csv", na.strings=c("NA", "#DIV/0!", " "))
+```
+We have a quick look at the dimensions of the data frames:
+```{r dimensions1}
+dim(pmlTrain)
+dim(pmlTest)
 ```
 
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+#Date Pre-processing
+Having inspected each data frame using View(), the first six variables were removed. These contained identifier and timestamp data that would be of no value to the model.
+```{r ident_remove}
+pmlTrain <- pmlTrain[,7:160]
+pmlTest <- pmlTest[,7:160]
+```
+We then check the dimensions to make sure everything looks sensible:
+```{r dimensions2}
+dim(pmlTrain)
+dim(pmlTest)
+```
+
+
+As 154 variables is quite a lot for my old laptop to build a model with, it was decided to remove any variables that contained NA values.
+```{r remove_na}
+pmlTrain <- pmlTrain[,colSums(is.na(pmlTrain)) == 0]
+pmlTest <- pmlTest[,colSums(is.na(pmlTest)) == 0]
+```
+
+A look at the dimensions after this step reveals that we have now reduced the number of variables to 54.
+```{r dimensions3}
+dim(pmlTrain)
+dim(pmlTest)
+```
+54 is still quite a lot of variables so I checked to see if any of the variables had a very low variance across all the observations. Variables that have low variance may not be of much value when building a model so they would be good candidates for removal. However, none of the remaining 54 variables displayed low variance within the threshold of the defaults for the "nearZeroVar" function.
+```{r variance}
+nearZeroVar(pmlTrain)
+```
+As I still wanted to reduce the number of variables I checked the correlation bewtween variables to see if any were highly correlated and could be removed. 
+First, correlations were plotted:
+```{r corr_plot}
+correlations <- cor(pmlTrain[,1:53])
+par(ps=5)
+corrplot(correlations, order = "hclust")
+```
+
+I then used the 'findCorrelation' function to find variables that had a correlation greater than 0.75. It returned the column numbers of 21 variables that could be removed as they were highly correlated with other variables in the data set.
+```{r correlations}
+highCorr <- findCorrelation(correlations, cutoff = .75)
+length(highCorr)
+pmlTrain_final <- pmlTrain[,-highCorr]
+```
+
+A final check of the dimensions of the training data reveals we have 19622 observations of 33 variables to build the model.
+```{r dimensions}
+dim(pmlTrain_final)
+```
+
+
+# Building the Model
+The training data was partitioned into two sets for model validation.
+```{r partition}
+inTrain <- createDataPartition(y=pmlTrain_final$classe, p=0.70, list=FALSE)
+
+train1 <- pmlTrain_final[inTrain,]
+train2 <- pmlTrain_final[-inTrain,]
+```
+
+A Random Forest model is then fitted to the data. 2-fold cross validation is used as running times for the "train" function were very high with higher k.
+```{r model, message=FALSE, warning=FALSE}
+set.seed(12345)
+modFit <- train(classe~., data=train1, method="rf", trControl=trainControl(method="cv",number=2), prox=TRUE)
+```
+
+The model was then used to predict on the 'train2' data set, which had been partitioned off with 30% of the training data.
+```{r predict}
+pred <- predict(modFit, newdata=train2)
+```
+A confusion matrix was then used to check the accuracy of the predictions
+```{r confusion}
+confusionMatrix(pred, train2$classe)
+```
+
+So the accuracy of the model is an amazing 99.81%!
+
+Using the 'modFit' object, I predict on the 20 Test cases. I've uploaded these to the Coursera quiz page and scored 20/20 correct.
+```{r test}
+predTest <- predict(modFit, newdata=pmlTest)
+predTest
+```
+
+# Out of Sample accuracy
+The out-of-sample error is 1 minus the out-of-sample accuracy i.e 0.19%
+```{r sample}
+1-0.9981
+```
+
+
